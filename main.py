@@ -11,6 +11,8 @@ class Main(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
+        #초기 잠금
+        self.initAuthLock() #인증버튼
 
 if __name__=="__main__":
     app=QApplication(sys.argv)
