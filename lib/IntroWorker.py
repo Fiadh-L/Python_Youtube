@@ -7,4 +7,4 @@ class IntroWorker(QObject):
     def playBgm(self):
         self.intro = QSound("D:/Python_App/Python_Youtube/resource/intro.wav")
         self.intro.play()
-        self.startMsg.emit("Anonymous", self.intro.fileName())
+        self.startMsg.emit("Anonymous", self.intro.fileName()) #동기화 유지,
