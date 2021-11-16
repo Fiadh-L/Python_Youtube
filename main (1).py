@@ -2,38 +2,47 @@ import sys
 from PyQt5.QtWidgets import *
 from PyQt5 import QtCore
 from PyQt5.QtCore import *
-from PyQt5.QtCore import pyqtSlot, pyqtSignal
+from PyQt5.QtCore import pyqtSlot, pyqtSignal, QUrl, QThread
 from PyQt5 import uic
 from lib.You_View_Layout import Ui_MainWindow
 from lib.AuthDialog import AuthDialog
+from lib.IntroWorker import IntroWorker
 from PyQt5 import QtWebEngineWidgets
 import re
 import datetime
 from pytube import YouTube
 import pytube
+from PyQt5.QtMultimedia import QSound
 
 class Main(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
+        #UI초기화
         self.setupUi(self)
-        #초기 잠금
-        self.initAuthLock() #인증버튼
-        #시그널 초기화되는 메서드 선언
+        #초기 잠금(인증안된상태)
+        self.initAuthLock() #인증 버튼
+        #t시그널
         self.initSignal()
         #로그인 관련 변수 선언
         self.user_id = None
         self.user_pw = None
-        #재생여부
+        #재생 여부
         self.is_play=False
         #Youtube 관련 작업
         self.youtb = None
         self.youtb_fsize = 0
+        #배경음악 Thread 작업 선언
+        self.initIntroThread()
+        #Qthread 사용
+        #QSound.play("D:/Bigpy_Pro/resource/intro.wav")
 
+
+    #기본 UI 비활성화
     def initAuthLock(self):
         self.previewButton.setEnabled(False)
         self.fileNavButton.setEnabled(False)
-        self.streamCombobox.setEnabled(False)
         self.startButton.setEnabled(False)
+        self.streamCombobox.setEnabled(False)
         self.calendarWidget.setEnabled(False)
         self.urlTextEdit.setEnabled(False)
         self.pathTextEdit.setEnabled(False)
@@ -43,18 +52,18 @@ class Main(QMainWindow, Ui_MainWindow):
     def initAuthActive(self):
         self.previewButton.setEnabled(True)
         self.fileNavButton.setEnabled(True)
+        self.startButton.setEnabled(True)
         self.streamCombobox.setEnabled(True)
         self.calendarWidget.setEnabled(True)
         self.urlTextEdit.setEnabled(True)
         self.pathTextEdit.setEnabled(True)
-        self.showStatusMsg('인증 완료')
+        self.showStatusMsg('인증완료')
 
-    def showStatusMsg(self,msg):
+    def showStatusMsg(self, msg):
         self.statusbar.showMessage(msg)
 
-
-    #시그널 초기화
-    def initSignal(self):
+    #인증 시그널 초기화
+    def initSignal(self): #인터페이스라고 생각해주면 됨
         self.loginButton.clicked.connect(self.authCheck)
         self.previewButton.clicked.connect(self.load_url)
         #종료버튼
@@ -68,29 +77,53 @@ class Main(QMainWindow, Ui_MainWindow):
         #스타트 버튼 구현
         self.startButton.clicked.connect(self.downloadYoutb)
 
-    @pyqtSlot()
+    #인트로 쓰레드 초기화 및 활성화
+    def initIntroThread(self):
+        #Worker 선언
+        self.introObj=IntroWorker()
+        #Qthread 선언
+        self.introThread=QThread()
+        #QObject를 상속받았으므로 moveToThread메소드 사용 가능 즉 Worker To thread로 변환 작업
+        self.introObj.moveToThread(self.introThread)
+        #시그널 연결
+        self.introObj.startMsg.connect(self.showIntroInfo)
+        #Thread 시작 메소드 연결
+        self.introThread.started.connect(self.introObj.playBgm)
+        #Thread 스타트
+        self.introThread.start()
+
+    #인트로 쓰레드 Signal 실행
+    def showIntroInfo(self, msg, filename):
+        self.plainTextEdit.appendPlainText("Program Started by : " + msg)
+        self.plainTextEdit.appendPlainText("Playing intoro infomation id  : " + filename)
+
+    @pyqtSlot() #명시적 표현
     def authCheck(self):
-        dlg = AuthDialog()
+        #print('login test commit')
+        dlg=AuthDialog()
         dlg.exec_()
+        #위젯에 있는 id,pw가 넘어옴
         self.user_id = dlg.user_id
         self.user_pw = dlg.user_pw
+        print("id: %s pw: %s" % (self.user_id, self.user_pw))
 
-        print("id : %s password : %s" %(self.user_id, self.user_pw))
+        #DB연동 또는 서버 연동 코드
 
-        if True: # 강제로 아이디 비번 모두 맞게 선언
-            self.initAuthActive() #로그인후 모두 활성화
-            self.loginButton.setText("인증완료")
+        if True : #강제로 아이디 비번 모두 맞게 선언
+            self.initAuthActive() #로그인 후 모두 활성화
+            self.loginButton.setText("Logout")
             self.loginButton.setEnabled(False) #인증버튼 1회 사용후 잠금
-            self.urlTextEdit.setFocus(True) #커서 자동 이동
+            self.urlTextEdit.setFocus(True) #커서 이동
+            self.append_log_msg("login Success") #로그기록 쓰기
         else:
-            QMessageBox.about(self, "인증오류", "아이디 또는 비밀번호 인증 오류")
+            QMessageBox.about(self, "인증오류", "아이디 비밀번호를 확인하세요!")
 
     def load_url(self):
         url=self.urlTextEdit.text().strip()
         v=re.compile('^https://www.youtube.com/watch?')
-        if self.is_play: # 재생중일때 재생멈추는 코드
+        if self.is_play: #재생중일때 멈춤
             self.append_log_msg('Stop Click')
-            self.webEngineView.load(QUrl('about:blank')) # about:blank : 빈페이지로 초기화
+            self.webEngineView.load(QUrl('about:blank')) #about:blank: 빈페이지로 초기화
             self.previewButton.setText("Play")
             self.is_play=False
             self.urlTextEdit.clear()
@@ -100,18 +133,17 @@ class Main(QMainWindow, Ui_MainWindow):
             self.progressBar_2.setValue(0)  #다운로드 완료시 초기화
             self.showStatusMsg("인증완료")
 
-        else : #재생전이므로 재생이 가능하도록 구현
-            if v.match(url) is not None :
+        else : #재생전이므로 재생가능하도록 구현
+            if v.match(url) is not None:
                 self.append_log_msg('Play Click')
                 self.webEngineView.load(QUrl(url))
 
-                #상태 표시줄
+                #상태표시줄
                 self.showStatusMsg(url + " 재생중")
-                self.previewButton.setText("Stop")
+                self.previewButton.setText("중지")
                 self.is_play=True
                 self.startButton.setEnabled(True)
-                self.initialYouWork(url) #url의 핵심부분
-
+                self.initialYouWork(url)
             else:
                 QMessageBox.about(self, "URL 형식오류","Youtube 주소형식이 다름니다.")
                 self.urlTextEdit.clear()
@@ -120,10 +152,10 @@ class Main(QMainWindow, Ui_MainWindow):
     def initialYouWork(self,url):
         video_list = pytube.YouTube(url)
         #로딩바 계산 (register_on_progress_callback:pytube에서 제공)
-        video_list.register_on_progress_callback(self.showProgressDownLoading) # 작업중인 것을 데리고 와봐
+        video_list.register_on_progress_callback(self.showProgressDownLoading)
         #self.youtb = video_list.streams.all()
         self.youtb = video_list.streams
-        self.streamCombobox.clear() #StreamCombobox 초기화
+        self.streamCombobox.clear() #streamCombobox 초기화
         for i,q in enumerate(self.youtb.all()):
             print(i, ":", q)
             #print('step1 : ',q.itag,q.mime_type,q.abr)
@@ -147,12 +179,13 @@ class Main(QMainWindow, Ui_MainWindow):
             #print('join',','.join(str_list))
             self.streamCombobox.addItem(','.join(str_list))
 
-    def append_log_msg(self, act):
+
+    def append_log_msg(self, act): #act => "login Success"
         now=datetime.datetime.now()
         nowDatetime=now.strftime('%Y-%m-%d %H:%M:%S')
         app_msg=self.user_id + ' : '+act+'-->('+ nowDatetime +')'
-        print(app_msg)
-        self.plainTextEdit.appendPlainText(app_msg)
+        #print(app_msg)
+        self.plainTextEdit.appendPlainText(app_msg) #insertPlaintext
         #활동 로그 저장 (DB를 사용 추#)
         with open('D:/Python_App/Python_Youtube/log/log.txt', 'a') as f:
             f.write(app_msg+'\n')
@@ -163,12 +196,11 @@ class Main(QMainWindow, Ui_MainWindow):
 
     @pyqtSlot()
     def selectDownPath(self):
-        print('save test')
+        #print('save test')
         #경로 선택
         fpath=QFileDialog.getExistingDirectory(self, 'Select Directory')
         self.pathTextEdit.setText(fpath)
 
-    #캘린더 부분
     @pyqtSlot()
     def append_date(self):
         cur_date=self.calendarWidget.selectedDate()
@@ -179,7 +211,6 @@ class Main(QMainWindow, Ui_MainWindow):
         self.append_log_msg(Calender_msg)
         #self.append_log_msg('Calendar Click')
 
-    #저장부분
     @pyqtSlot()
     def downloadYoutb(self):
         down_dir = self.pathTextEdit.text().strip() #strip():공백제거
@@ -190,18 +221,22 @@ class Main(QMainWindow, Ui_MainWindow):
         self.youtb_fsize = self.youtb[self.streamCombobox.currentIndex()].filesize
         print('fsize : ',self.youtb_fsize)
         self.youtb[self.streamCombobox.currentIndex()].download(down_dir)
-        # 주소 입력하면 최소 15개 정도의 index가 생성되며, 선택한 것의 파일 사이즈를 가져와!
         self.append_log_msg('Download Click')
+         # 100->90->80->70->60...
+
+    # def showProgressDownLoading(self, stream, chunk, bytes_remaining):
+    #      print(int(self.youtb_fsize - bytes_remaining))
+    #      print('bytes_remaining',bytes_remaining)
+    #      self.progressBar_2.setValue(int(((self.youtb_fsize - bytes_remaining) / self.youtb_fsize) * 100))
 
     def showProgressDownLoading(self, stream, chunk, bytes_remaining): #stream, chunk, bytes_remaining: 서버 레지스트리에서 주는거라고함.
         #bytes_remaining: 서버 레지스트리에서 주는 현재 다운받기에서 남은 용량
-        #register_on_progress_callback에서 stream, chunk, bytes_remaining을 줌!
         print(int(self.youtb_fsize - bytes_remaining))
         print('bytes_remaining',bytes_remaining)
         self.progressBar_2.setValue(int(((self.youtb_fsize - bytes_remaining) / self.youtb_fsize) * 100))
 
 if __name__=="__main__":
     app=QApplication(sys.argv)
-    you_view_main=Main()
-    you_view_main.show()
-    app.exec()
+    you_viewer_main=Main()
+    you_viewer_main.show()
+    app.exec_()
